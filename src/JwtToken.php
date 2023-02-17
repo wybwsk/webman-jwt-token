@@ -50,31 +50,48 @@ class JwtToken {
         $token = str_replace('Bearer ', '', $token);
         $jwtToken = $this->authcode($token, 'DECODE', $this->jwtConfig[$this->store]['signer_key']);
         if (!empty($jwtToken)) {
-            try {
-                $tokenPayload = (array)JWT::decode($jwtToken, new Key(file_get_contents($this->jwtConfig[$this->store]['public_key']), 'RS256'));
-            } catch (SignatureInvalidException $e) {
-                throw new JwtTokenException('身份验证令牌无效');
-            } catch (BeforeValidException $e) { // 签名在某个时间点之后才能用
-                throw new JwtTokenException('身份验证令牌尚未生效');
-            } catch (ExpiredException $e) { // token过期
-                throw new JwtTokenException('身份验证会话已过期，请重新登录！');
-            } catch (UnexpectedValueException $unexpectedValueException) {
-                throw new JwtTokenException('获取扩展字段不正确');
-            } catch (Exception $e) {
-                throw new JwtTokenException($e->getMessage());
-            }
-            $tokenPayload['data'] = (array)$tokenPayload['data'];
+            $tokenPayload = $this->jwtDecode($jwtToken);
             if ($this->jwtConfig[$this->store]['login_type'] === 'sso') {
                 //最新的TOKEN的发布时间
                 $blackListIat = Redis::get($this->getCacheKey($tokenPayload['data']['uid']));
                 if ($blackListIat != $tokenPayload['iat']) {
-                    return false;
+                    throw new JwtTokenException('身份验证令牌无效');
                 }
             }
             return $tokenPayload;
         } else {
             return false;
         }
+    }
+
+    public function logout($token) {
+        $token = str_replace('Bearer ', '', $token);
+        $jwtToken = $this->authcode($token, 'DECODE', $this->jwtConfig[$this->store]['signer_key']);
+        if (!empty($jwtToken)) {
+            $tokenPayload = $this->jwtDecode($jwtToken);
+            if ($this->jwtConfig[$this->store]['login_type'] === 'sso') {
+                Redis::del($this->getCacheKey($tokenPayload['data']['uid']));
+            }
+            return true;
+        }
+    }
+
+    private function jwtDecode($jwtToken) {
+        try {
+            $tokenPayload = (array)JWT::decode($jwtToken, new Key(file_get_contents($this->jwtConfig[$this->store]['public_key']), 'RS256'));
+        } catch (SignatureInvalidException $e) {
+            throw new JwtTokenException('身份验证令牌无效');
+        } catch (BeforeValidException $e) { // 签名在某个时间点之后才能用
+            throw new JwtTokenException('身份验证令牌尚未生效');
+        } catch (ExpiredException $e) { // token过期
+            throw new JwtTokenException('身份验证会话已过期，请重新登录！');
+        } catch (UnexpectedValueException $unexpectedValueException) {
+            throw new JwtTokenException('获取扩展字段不正确');
+        } catch (Exception $e) {
+            throw new JwtTokenException($e->getMessage());
+        }
+        $tokenPayload['data'] = (array)$tokenPayload['data'];
+        return $tokenPayload;
     }
 
     private function buildPayLoad($id, $claims): array {

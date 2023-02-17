@@ -8,6 +8,7 @@ namespace Wybwsk\JwtToken\facade;
  * @mixin \Wybwsk\JwtToken\JwtToken
  * @method static token($id, array $claims) 生成 Token
  * @method static validate($token) 生成 Token
+ * @method static logout($token) 注释Token 仅sso生效
  */
 class JwtToken {
     protected static array $_instance = [];
