@@ -48,7 +48,7 @@ class JwtToken {
 
     public function validate($token) {
         $token = str_replace('Bearer ', '', $token);
-        $jwtToken = $this->authcode($token, 'DECODE', $this->jwtConfig[$this->store]['signer_key']);
+        $jwtToken = $this->encrypt($token, 'D', $this->jwtConfig[$this->store]['signer_key']);
         if (!empty($jwtToken)) {
             $tokenPayload = $this->jwtDecode($jwtToken);
             if ($this->jwtConfig[$this->store]['login_type'] === 'sso') {
@@ -66,7 +66,7 @@ class JwtToken {
 
     public function logout($token) {
         $token = str_replace('Bearer ', '', $token);
-        $jwtToken = $this->authcode($token, 'DECODE', $this->jwtConfig[$this->store]['signer_key']);
+        $jwtToken = $this->encrypt($token, 'D', $this->jwtConfig[$this->store]['signer_key']);
         if (!empty($jwtToken)) {
             $tokenPayload = $this->jwtDecode($jwtToken);
             if ($this->jwtConfig[$this->store]['login_type'] === 'sso') {
@@ -111,9 +111,9 @@ class JwtToken {
         $refreshPayload['exp'] = $this->getRefreshExpireTime($this->iatTime);
         return [
             'token_type'     => 'Bearer',
-            'access_token'   => $this->authcode(JWT::encode($payload, file_get_contents($this->jwtConfig[$this->store]['private_key']), 'RS256'), 'ENCODE', $this->jwtConfig[$this->store]['signer_key']),
+            'access_token'   => $this->encrypt(JWT::encode($payload, file_get_contents($this->jwtConfig[$this->store]['private_key']), 'RS256'), 'E', $this->jwtConfig[$this->store]['signer_key']),
             'expire'         => $this->getExpireTime($this->iatTime),
-            'refresh_token'  => $this->authcode(JWT::encode($refreshPayload, file_get_contents($this->jwtConfig[$this->store]['private_key']), 'RS256'), 'ENCODE', $this->jwtConfig[$this->store]['signer_key']),
+            'refresh_token'  => $this->encrypt(JWT::encode($refreshPayload, file_get_contents($this->jwtConfig[$this->store]['private_key']), 'RS256'), 'E', $this->jwtConfig[$this->store]['signer_key']),
             'refresh_expire' => $this->getRefreshExpireTime($this->iatTime)
         ];
     }
@@ -134,28 +134,33 @@ class JwtToken {
         return $this->store . 'BlackList:' . $this->getJti($id);
     }
 
-    private function authcode($string, $operation = 'DECODE', $key = '', $expiry = 0): string {
-        $ckey_length = 4;
+    /**
+     * @param $string    要加密/解密的字符串
+     * @param $operation    类型，E 加密；D 解密
+     * @param string $key 密钥
+     * @return mixed|string
+     */
+    private function encrypt($string, $operation, $key = 'encrypt') {
+
         $key = md5($key);
-        $keya = md5(substr($key, 0, 16));
-        $keyb = md5(substr($key, 16, 16));
-        $keyc = $ckey_length ? ($operation == 'DECODE' ? substr($string, 0, $ckey_length) : substr(md5(microtime()), -$ckey_length)) : '';
-        $cryptkey = $keya . md5($keya . $keyc);
-        $key_length = strlen($cryptkey);
-        $string = $operation == 'DECODE' ? base64_decode(substr($string, $ckey_length)) : sprintf('%010d', $expiry ? $expiry + time() : 0) . substr(md5($string . $keyb), 0, 16) . $string;
+        $key_length = strlen($key);
+        $string = $operation == 'D' ? base64_decode($string) : substr(md5($string . $key), 0, 8) . $string;
         $string_length = strlen($string);
+        $rndkey = $box = array();
         $result = '';
-        $box = range(0, 255);
-        $rndkey = array();
+
         for ($i = 0; $i <= 255; $i++) {
-            $rndkey[$i] = ord($cryptkey[$i % $key_length]);
+            $rndkey[$i] = ord($key[$i % $key_length]);
+            $box[$i] = $i;
         }
+
         for ($j = $i = 0; $i < 256; $i++) {
             $j = ($j + $box[$i] + $rndkey[$i]) % 256;
             $tmp = $box[$i];
             $box[$i] = $box[$j];
             $box[$j] = $tmp;
         }
+
         for ($a = $j = $i = 0; $i < $string_length; $i++) {
             $a = ($a + 1) % 256;
             $j = ($j + $box[$a]) % 256;
@@ -164,14 +169,15 @@ class JwtToken {
             $box[$j] = $tmp;
             $result .= chr(ord($string[$i]) ^ ($box[($box[$a] + $box[$j]) % 256]));
         }
-        if ($operation == 'DECODE') {
-            if ((substr($result, 0, 10) == 0 || substr($result, 0, 10) - time() > 0) && substr($result, 10, 16) == substr(md5(substr($result, 26) . $keyb), 0, 16)) {
-                return substr($result, 26);
+        if ($operation == 'D') {
+            if (substr($result, 0, 8) == substr(md5(substr($result, 8) . $key), 0, 8)) {
+                return substr($result, 8);
             } else {
                 return '';
             }
         } else {
-            return $keyc . str_replace('=', '', base64_encode($result));
+            return str_replace('=', '', base64_encode($result));
         }
     }
+
 }
