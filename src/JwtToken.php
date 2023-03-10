@@ -140,7 +140,7 @@ class JwtToken {
      * @param string $key 密钥
      * @return mixed|string
      */
-    private function encrypt($string, $operation, $key = 'encrypt') {
+    private function encrypt($string, $operation, $key = 'E') {
 
         $key = md5($key);
         $key_length = strlen($key);
