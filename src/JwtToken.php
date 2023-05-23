@@ -119,11 +119,11 @@ class JwtToken {
     }
 
     private function getRefreshExpireTime($iatTime) {
-        return $iatTime + $this->jwtConfig[$this->store]['refresh_ttL'];
+        return bcadd((string)$iatTime, (string)$this->jwtConfig[$this->store]['refresh_ttL']);
     }
 
     private function getExpireTime($iatTime) {
-        return $iatTime + $this->jwtConfig[$this->store]['expires_at'];
+        return bcadd((string)$iatTime, (string)$this->jwtConfig[$this->store]['expires_at']);
     }
 
     private function getJti($id): string {
