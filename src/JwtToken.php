@@ -3,8 +3,6 @@ declare (strict_types=1);
 
 namespace Wybwsk\JwtToken;
 
-use Carbon\Carbon;
-
 use Exception;
 use UnexpectedValueException;
 use Wybwsk\JwtToken\Exception\JwtTokenException;
@@ -14,12 +12,14 @@ use Firebase\JWT\BeforeValidException;
 use Firebase\JWT\ExpiredException;
 use Firebase\JWT\SignatureInvalidException;
 use support\Redis;
+use Carbon\Carbon;
 
 class JwtToken {
     protected array  $jwtConfig = []; //JWT配置
     protected string $store;     //应用
     protected string $timeZone  = 'PRC'; //时区
-    protected int    $iatTime; //JWT 发布时间
+
+//    protected int    $iatTime; //JWT 发布时间
 
     public function __construct($store = null) {
         $_config = config('plugin.wybwsk.webman-jwt-token.app');
@@ -31,16 +31,16 @@ class JwtToken {
         foreach ($_config['stores'] as $key => $scene) {
             $this->jwtConfig[$key] = $scene;
         }
-        $this->iatTime = Carbon::now($this->timeZone)->timestamp;
     }
 
     /**
      * 生成 Token
      */
-    public function token($id, array $claims = []): array {
-        $payload = $this->buildPayLoad($id, $claims);
-        $token = $this->make($payload);
-        if ($this->jwtConfig[$this->store]['login_type'] === 'sso') {
+    public function token($id, array $claims = [], $iatTime): array {
+        $iatTime = Carbon::now($this->timeZone)->timestamp;
+        $payload = $this->buildPayLoad($id, $claims, $iatTime);
+        $token = $this->make($payload, $iatTime);
+        if ($this->jwtConfig[$this->store]['login_type'] == 'sso') {
             Redis::setex($this->getCacheKey($id), $this->jwtConfig[$this->store]['expires_at'], $payload['iat']);
         }
         return $token;
@@ -49,31 +49,32 @@ class JwtToken {
     public function validate($token) {
         $token = str_replace('Bearer ', '', $token);
         $jwtToken = $this->encrypt($token, 'D', $this->jwtConfig[$this->store]['signer_key']);
-        if (!empty($jwtToken)) {
-            $tokenPayload = $this->jwtDecode($jwtToken);
-            if ($this->jwtConfig[$this->store]['login_type'] === 'sso') {
-                //最新的TOKEN的发布时间
-                $blackListIat = Redis::get($this->getCacheKey($tokenPayload['data']['uid']));
-                if ($blackListIat != $tokenPayload['iat']) {
-                    throw new JwtTokenException('身份验证令牌无效');
-                }
-            }
-            return $tokenPayload;
-        } else {
+        if (empty($jwtToken)) {
             return false;
         }
+        $tokenPayload = $this->jwtDecode($jwtToken);
+        if ($this->jwtConfig[$this->store]['login_type'] == 'sso') {
+            //最新的TOKEN的发布时间
+            $blackListIat = Redis::get($this->getCacheKey($tokenPayload['data']['uid']));
+            if ($blackListIat != $tokenPayload['iat']) {
+                throw new JwtTokenException('身份验证令牌无效');
+            }
+        }
+        return $tokenPayload;
     }
 
     public function logout($token) {
         $token = str_replace('Bearer ', '', $token);
         $jwtToken = $this->encrypt($token, 'D', $this->jwtConfig[$this->store]['signer_key']);
-        if (!empty($jwtToken)) {
-            $tokenPayload = $this->jwtDecode($jwtToken);
-            if ($this->jwtConfig[$this->store]['login_type'] === 'sso') {
-                Redis::del($this->getCacheKey($tokenPayload['data']['uid']));
-            }
-            return true;
+        if (empty($jwtToken)) {
+            return false;
         }
+        $tokenPayload = $this->jwtDecode($jwtToken);
+        if ($this->jwtConfig[$this->store]['login_type'] == 'sso') {
+            Redis::del($this->getCacheKey($tokenPayload['data']['uid']));
+        }
+        return true;
+        
     }
 
     private function jwtDecode($jwtToken) {
@@ -94,27 +95,27 @@ class JwtToken {
         return $tokenPayload;
     }
 
-    private function buildPayLoad($id, $claims): array {
+    private function buildPayLoad($id, $claims, $iatTime): array {
         return [
             'iss'  => $this->jwtConfig[$this->store]['iss'],
             'aud'  => $this->store,
-            'iat'  => $this->iatTime, //发布时间
-            'nbf'  => $this->iatTime, //生效时间
-            'exp'  => $this->getExpireTime($this->iatTime), //过期时间
+            'iat'  => $iatTime, //发布时间
+            'nbf'  => $iatTime, //生效时间
+            'exp'  => $this->getExpireTime($iatTime), //过期时间
             'jti'  => $this->getJti($id),
             'data' => $claims
         ];
     }
 
-    private function make($payload): array {
+    private function make($payload, $iatTime): array {
         $refreshPayload = $payload;
-        $refreshPayload['exp'] = $this->getRefreshExpireTime($this->iatTime);
+        $refreshPayload['exp'] = $this->getRefreshExpireTime($iatTime);
         return [
             'token_type'     => 'Bearer',
             'access_token'   => $this->encrypt(JWT::encode($payload, file_get_contents($this->jwtConfig[$this->store]['private_key']), 'RS256'), 'E', $this->jwtConfig[$this->store]['signer_key']),
-            'expire'         => $this->getExpireTime($this->iatTime),
+            'expire'         => $this->getExpireTime($iatTime),
             'refresh_token'  => $this->encrypt(JWT::encode($refreshPayload, file_get_contents($this->jwtConfig[$this->store]['private_key']), 'RS256'), 'E', $this->jwtConfig[$this->store]['signer_key']),
-            'refresh_expire' => $this->getRefreshExpireTime($this->iatTime)
+            'refresh_expire' => $this->getRefreshExpireTime($iatTime)
         ];
     }
 
