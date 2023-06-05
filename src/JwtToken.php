@@ -12,7 +12,6 @@ use Firebase\JWT\BeforeValidException;
 use Firebase\JWT\ExpiredException;
 use Firebase\JWT\SignatureInvalidException;
 use support\Redis;
-use Carbon\Carbon;
 
 class JwtToken {
     protected array  $jwtConfig = []; //JWT配置
@@ -36,8 +35,8 @@ class JwtToken {
     /**
      * 生成 Token
      */
-    public function token($id, array $claims = [], $iatTime): array {
-        $iatTime = Carbon::now($this->timeZone)->timestamp;
+    public function token($id, array $claims = []): array {
+        $iatTime = time();
         $payload = $this->buildPayLoad($id, $claims, $iatTime);
         $token = $this->make($payload, $iatTime);
         if ($this->jwtConfig[$this->store]['login_type'] == 'sso') {
@@ -74,7 +73,7 @@ class JwtToken {
             Redis::del($this->getCacheKey($tokenPayload['data']['uid']));
         }
         return true;
-        
+
     }
 
     private function jwtDecode($jwtToken) {
